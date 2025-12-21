@@ -1,6 +1,6 @@
 {
 	"admin/services/at-webserver": {
-		"title": "AT WebServer",
+		"title": "MT5700 AT WebServer",
 		"order": 60,
 		"action": {
 			"type": "firstchild"

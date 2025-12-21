@@ -186,6 +186,20 @@ return view.extend({
 		o.datatype = 'uinteger';
 		o.default = '10';
 		o.depends('connection_type', 'SERIAL');
+	// 串口连接方法
+	o = s.option(form.ListValue, 'serial_method', _('连接方法'),
+		_('选择连接方法'));
+	o.value('TOM_MODEM', _('TOM_MODEM'));
+	o.value('DIRECT', _('直接连接'));
+	o.default = 'TOM_MODEM';
+	o.depends('connection_type', 'SERIAL');
+
+	o = s.option(form.ListValue, 'serial_feature', _('UBUS特性'),
+		_('UBUS特性'));
+	o.value('UBUS', _('UBUS'));
+	o.value('NONE', _('无'));
+	o.default = 'UBUS';
+	o.depends('serial_method', 'TOM_MODEM');
 
 	// WebSocket配置
 	o = s.option(form.DummyValue, '_websocket_title', _('WebSocket 配置'));
