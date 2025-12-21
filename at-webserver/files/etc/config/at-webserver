@@ -11,6 +11,8 @@ config at-webserver 'config'
 	option serial_port_custom '/dev/ttyUSB0'  # 自定义串口路径（当 serial_port='custom' 时使用）
 	option serial_baudrate '115200'
 	option serial_timeout '10'
+	option serial_method 'TOM_MODEM' 	# 串口通信方式 (TOM_MODEM / DIRECT)
+	option serial_feature 'UBUS'		#TOM Modem 特性 
 	option websocket_port '8765'
 	option websocket_allow_wan '0'          # 是否允许外网访问 WebSocket (0=禁止, 1=允许)
 	option websocket_auth_key ''            # WebSocket 连接密钥（留空则不验证）

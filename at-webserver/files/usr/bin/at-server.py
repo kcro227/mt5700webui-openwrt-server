@@ -13,6 +13,7 @@ import serial
 import os
 from datetime import datetime
 import logging
+import subprocess
 
 # 配置日志
 logging.basicConfig(
@@ -32,7 +33,9 @@ DEFAULT_CONFIG = {
         "SERIAL": {
             "PORT": "COM6",  # 串口设备路径
             "BAUDRATE": 115200,  # 波特率
-            "TIMEOUT": 10
+            "TIMEOUT": 10,
+            "METHOD": "TOM_MODEM",
+            "FEATURE": "UBUS"
         }
     },
     "NOTIFICATION_CONFIG": {
@@ -135,6 +138,11 @@ def load_config():
             config['AT_CONFIG']['SERIAL']['BAUDRATE'] = baudrate
             config['AT_CONFIG']['SERIAL']['TIMEOUT'] = timeout
             logger.info(f"配置加载: 串口连接 {port} @ {baudrate} bps (超时: {timeout}秒)")
+            config['AT_CONFIG']['SERIAL']['METHOD'] = uci_data.get('serial_method', 'TOM_MODEM')
+            config['AT_CONFIG']['SERIAL']['FEATURE'] = uci_data.get('serial_feature', 'UBUS')
+            logger.info(f"配置加载: 串口方法 = {config['AT_CONFIG']['SERIAL']['METHOD']}, 功能 = {config['AT_CONFIG']['SERIAL']['FEATURE']}")
+
+        
         
         # 读取 WebSocket 端口
         ws_port = int(uci_data.get('websocket_port', '8765'))
@@ -1971,6 +1979,54 @@ class SerialATConnection(ATConnection):
             return b""
         except KeyboardInterrupt:
             raise  # 直接向上传播，让上层处理
+            
+class TomModemATConnection(ATConnection):
+    """Tom Modem AT连接实现"""
+
+    def __init__(self, port: str, timeout: int, feature: str):
+        super().__init__()
+        self.port = port
+        self.timeout = timeout
+        self.tom_modem_tool = "tom_modem"
+        self.is_connected = False
+        self.feature = None
+        if feature == "UBUS":
+            self.feature = '-u'
+        self.response = ""
+
+    async def connect(self) -> bool:
+        """建立连接"""
+        self.is_connected = True
+        return True
+
+    async def close(self):
+        """关闭连接"""
+        self.is_connected = False
+
+    async def send(self, data: bytes) -> int:
+        """发送数据"""
+        if not self.is_connected:
+            raise ConnectionError("未连接")
+
+        try:
+            command = data.decode('ascii', errors='ignore').strip()
+            # 执行tom_modem_tool命令
+            result = subprocess.run([self.tom_modem_tool, self.port, '-c', command, self.feature],
+                                    capture_output=True, timeout=self.timeout)
+            self.response = result.stdout.decode(errors='ignore')
+            return len(data)
+        except Exception as err:
+            self.is_connected = False
+            raise ConnectionError(f"发送命令失败: {err}")
+
+    async def receive(self, size: int) -> bytes:
+        """接收数据"""
+        buf = ''
+        if self.response:
+            buf = self.response.encode()
+            self.response = None
+        return buf
+
 class ATClient:
     def __init__(self):
         self.connection_type = AT_CONFIG["TYPE"]
@@ -1980,12 +2036,21 @@ class ATClient:
                 port=AT_CONFIG["NETWORK"]["PORT"],
                 timeout=AT_CONFIG["NETWORK"]["TIMEOUT"]
             )
-        else:  # SERIAL
-            self.connection = SerialATConnection(
-                port=AT_CONFIG["SERIAL"]["PORT"],
-                baudrate=AT_CONFIG["SERIAL"]["BAUDRATE"],
-                timeout=AT_CONFIG["SERIAL"]["TIMEOUT"]
-            )
+        else:  # SERIAL 
+            if "METHOD" not in AT_CONFIG["SERIAL"] or AT_CONFIG["SERIAL"]["METHOD"] == "DIRECT":
+                logger.info("直接连接串口")
+                self.connection = SerialATConnection(
+                    port=AT_CONFIG["SERIAL"]["PORT"],
+                    baudrate=AT_CONFIG["SERIAL"]["BAUDRATE"],
+                    timeout=AT_CONFIG["SERIAL"]["TIMEOUT"]
+                )
+            elif AT_CONFIG["SERIAL"]["METHOD"] == "TOM_MODEM":
+                logger.info("使用tommodem方法")
+                self.connection = TomModemATConnection(
+                    port=AT_CONFIG["SERIAL"]["PORT"],
+                    timeout=AT_CONFIG["SERIAL"]["TIMEOUT"],
+                    feature=AT_CONFIG["SERIAL"]["FEATURE"]
+                )
         self.websocket_server = None
         self.notification_manager = NotificationManager()
         self._partial_messages: Dict[str, Dict] = {}
