@@ -1,4 +1,8 @@
+# mt5700webui-server
+该版本为使用RUST编写的版本，并适配了Qmodem (也许)
 
+
+# 以下是原版
 为您准备了 已经编译好的版本自己安装依赖安装即可
 
 链接：https://www.123865.com/s/BwcjVv-PexFd?pwd=GweY#
