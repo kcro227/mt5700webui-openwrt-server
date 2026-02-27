@@ -22,3 +22,4 @@ chrono-tz = "0.10.4"
 
 [target.aarch64-unknown-linux-musl]
 linker = "aarch64-linux-gnu-gcc"
+
