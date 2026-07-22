@@ -1,11 +1,56 @@
 use async_trait::async_trait;
 use std::error::Error;
+use std::io::ErrorKind;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_serial::{SerialPortBuilderExt, SerialStream};
+
 use crate::config::{NetworkConfig, SerialConfig};
+
+fn should_reset_connection(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::BrokenPipe
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionReset
+            | ErrorKind::NotConnected
+            | ErrorKind::UnexpectedEof
+            | ErrorKind::ConnectionRefused
+            | ErrorKind::TimedOut
+    )
+}
+
+async fn write_with_timeout<W>(writer: &mut W, data: &[u8]) -> std::io::Result<usize>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    timeout(Duration::from_secs(2), writer.write(data))
+        .await
+        .unwrap_or_else(|_| Err(std::io::Error::new(ErrorKind::TimedOut, "write timed out")))
+}
+
+async fn read_with_timeout<R>(reader: &mut R, timeout_dur: Duration) -> std::io::Result<Vec<u8>>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let mut buf = vec![0u8; 1024];
+    match timeout(timeout_dur, reader.read(&mut buf)).await {
+        Ok(Ok(n)) => {
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "connection closed",
+                ));
+            }
+            buf.truncate(n);
+            Ok(buf)
+        }
+        Ok(Err(err)) => Err(err),
+        Err(_) => Err(std::io::Error::new(ErrorKind::TimedOut, "read timed out")),
+    }
+}
 
 // ========== AT 连接抽象 ==========
 
@@ -44,20 +89,40 @@ impl ATConnection for SerialATConn {
     }
 
     async fn send(&mut self, data: &[u8]) -> Result<usize, Box<dyn Error + Send + Sync>> {
-        if let Some(s) = &mut self.stream {
-            return Ok(s.write(data).await?);
+        if let Some(stream) = &mut self.stream {
+            match write_with_timeout(stream, data).await {
+                Ok(n) => Ok(n),
+                Err(err) => {
+                    self.stream = None;
+                    if should_reset_connection(&err) {
+                        return Err("Disconnected".into());
+                    }
+                    Err(Box::new(err))
+                }
+            }
+        } else {
+            Err("Disconnected".into())
         }
-        Err("Disconnected".into())
     }
 
     async fn receive(&mut self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
-        if let Some(s) = &mut self.stream {
-            let mut buf = vec![0u8; 1024];
-            let n = timeout(Duration::from_millis(25), s.read(&mut buf)).await??;
-            buf.truncate(n);
-            return Ok(buf);
+        if let Some(stream) = &mut self.stream {
+            match read_with_timeout(stream, Duration::from_millis(25)).await {
+                Ok(data) => Ok(data),
+                Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                    Ok(Vec::new())
+                }
+                Err(err) => {
+                    self.stream = None;
+                    if should_reset_connection(&err) {
+                        return Err("Disconnected".into());
+                    }
+                    Err(Box::new(err))
+                }
+            }
+        } else {
+            Err("Disconnected".into())
         }
-        Err("Disconnected".into())
     }
 
     fn is_connected(&self) -> bool {
@@ -95,20 +160,40 @@ impl ATConnection for NetworkATConn {
     }
 
     async fn send(&mut self, data: &[u8]) -> Result<usize, Box<dyn Error + Send + Sync>> {
-        if let Some(s) = &mut self.stream {
-            return Ok(s.write(data).await?);
+        if let Some(stream) = &mut self.stream {
+            match write_with_timeout(stream, data).await {
+                Ok(n) => Ok(n),
+                Err(err) => {
+                    self.stream = None;
+                    if should_reset_connection(&err) {
+                        return Err("Disconnected".into());
+                    }
+                    Err(Box::new(err))
+                }
+            }
+        } else {
+            Err("Disconnected".into())
         }
-        Err("Disconnected".into())
     }
 
     async fn receive(&mut self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
-        if let Some(s) = &mut self.stream {
-            let mut buf = vec![0u8; 1024];
-            let n = timeout(Duration::from_millis(25), s.read(&mut buf)).await??;
-            buf.truncate(n);
-            return Ok(buf);
+        if let Some(stream) = &mut self.stream {
+            match read_with_timeout(stream, Duration::from_millis(25)).await {
+                Ok(data) => Ok(data),
+                Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                    Ok(Vec::new())
+                }
+                Err(err) => {
+                    self.stream = None;
+                    if should_reset_connection(&err) {
+                        return Err("Disconnected".into());
+                    }
+                    Err(Box::new(err))
+                }
+            }
+        } else {
+            Err("Disconnected".into())
         }
-        Err("Disconnected".into())
     }
 
     fn is_connected(&self) -> bool {
@@ -151,15 +236,12 @@ impl ATConnection for TomModemATConn {
         }
 
         let command = String::from_utf8_lossy(data).trim().to_string();
-
-        // 构建 tom_modem 命令参数
         let mut args = vec![self.port.clone(), "-c".to_string(), command.clone()];
 
         if !self.feature.is_empty() && self.feature != "NONE" {
             args.push(format!("-{}", self.feature));
         }
 
-        // 执行命令
         let output = timeout(
             Duration::from_secs(self.timeout),
             tokio::process::Command::new("tom_modem").args(&args).output(),
