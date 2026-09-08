@@ -435,9 +435,12 @@ return view.extend({
 				if (enabledValue) {
 					var isEnabled = enabledValue.checked ? '1' : '0';
 					uci.set('at-webserver', 'config', 'enabled', isEnabled);
-					uci.save('at-webserver');
-					uci.commit('at-webserver');
 				}
+				// 等待提交完成后再由 handleSaveApply 重启服务，避免服务读取旧配置。
+				return uci.save('at-webserver').then(function () {
+					return uci.commit('at-webserver');
+				});
+			}).then(function () {
 				ui.addNotification(null, E('p', _('✓ 配置已保存并提交')), 'success');
 			});
 		}, this)).catch(L.bind(function (e) {
@@ -476,4 +479,3 @@ return view.extend({
 
 	handleReset: null
 });
-

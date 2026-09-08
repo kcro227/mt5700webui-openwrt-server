@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::TcpListener;
 use tokio::time::interval;
 
 mod config;
@@ -13,7 +12,7 @@ mod net_utils;
 use config::{load_config_from_uci, Config, DEFAULT_CONFIG_JSON};
 use at::ATClient;
 use airplane::AutoAirPlaneMode;
-use net_utils::create_dual_stack_listener;
+use net_utils::{create_dual_stack_listener, create_ipv4_listener};
 
 fn is_urc_line(line: &str) -> bool {
     let trimmed = line.trim();
@@ -145,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "{}:{}",
                 config.websocket_config.ipv4.host, config.websocket_config.ipv4.port
             );
-            match TcpListener::bind(&ws_v4_addr).await {
+            match create_ipv4_listener(&config.websocket_config.ipv4.host, config.websocket_config.ipv4.port).await {
                 Ok(listener) => {
                     println!("✓ 成功绑定IPv4监听器: {}", ws_v4_addr);
                     listener

@@ -16,6 +16,9 @@ pub async fn create_dual_stack_listener(host: &str, port: u16) -> Result<TcpList
 
     // 创建IPv6套接字
     let socket = TcpSocket::new_v6()?;
+    // 服务重启时允许立即重新绑定同一地址，避免短暂的内核连接状态导致
+    // “地址已被使用”，即使系统中已经没有监听进程。
+    socket.set_reuseaddr(true)?;
 
     // 设置套接字选项：允许IPv4映射（在Linux上默认启用）
     #[cfg(unix)]
@@ -46,6 +49,17 @@ pub async fn create_dual_stack_listener(host: &str, port: u16) -> Result<TcpList
     let listener = socket.listen(1024)?;
 
     Ok(listener)
+}
+
+/// 创建可复用的IPv4监听器，用于IPv6不可用时的回退。
+pub async fn create_ipv4_listener(host: &str, port: u16) -> Result<TcpListener, Box<dyn Error>> {
+    let ipv4_addr = host
+        .parse()
+        .map_err(|e| format!("无效的IPv4地址: {}", e))?;
+    let socket = TcpSocket::new_v4()?;
+    socket.set_reuseaddr(true)?;
+    socket.bind(SocketAddr::new(IpAddr::V4(ipv4_addr), port))?;
+    Ok(socket.listen(1024)?)
 }
 
 /// 备用方案：使用std::net创建监听器，然后转换为tokio的TcpListener

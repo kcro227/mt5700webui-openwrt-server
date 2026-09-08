@@ -16,9 +16,6 @@ start_service() {
 	# 输出到系统日志
 	logger -t at-webserver "开始启动服务..."
 	
-	# 确保最新的 UCI 已提交
-	uci -q commit at-webserver
-	
 	# 加载配置
 	config_load at-webserver
 	config_get_bool enabled config enabled 0
@@ -29,9 +26,9 @@ start_service() {
 		return 1
 	fi
 	
-	# 检查 Python 脚本是否存在
+	# 检查服务程序是否存在
 	if [ ! -f "$PROG" ]; then
-		logger -t at-webserver "错误：找不到脚本文件 $PROG"
+		logger -t at-webserver "错误：找不到服务程序 $PROG"
 		echo "Error: $PROG not found"
 		return 1
 	fi
@@ -206,10 +203,6 @@ start_service() {
 	
 	setup_firewall
 	
-	# 确保没有旧进程在运行
-	killall -q -9 "$PROG_NAME" 2>/dev/null
-	sleep 1
-	
 	logger -t at-webserver "配置 procd 实例..."
 	echo "Starting AT WebServer..."
 	
@@ -284,19 +277,12 @@ stop_service() {
 reload_service() {
 	logger -t at-webserver "重新加载配置..."
 	echo "Reloading AT WebServer configuration..."
-	
-	# 提交最新配置
-	uci -q commit at-webserver
-	
-	# 强制停止所有相关进程
-	killall -q -9 "$PROG_NAME" 2>/dev/null
-	rm -f /var/run/at-webserver.pid
-	
-	# 等待进程完全停止
-	sleep 3
-	
-	# 重新启动服务
-	start_service
+
+	# 通过 rc.common/procd 完整停止实例，避免旧实例仍被 procd
+	# 监控时与新实例同时启动并争抢监听端口。
+	stop
+	sleep 1
+	start
 	
 	logger -t at-webserver "配置重新加载完成"
 }
