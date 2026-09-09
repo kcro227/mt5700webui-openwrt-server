@@ -23,7 +23,7 @@ start_service() {
 	if [ "$enabled" -eq 0 ]; then
 		logger -t at-webserver "服务已禁用，退出启动"
 		echo "AT WebServer is disabled in configuration"
-		return 1
+		return 0
 	fi
 	
 	# 检查服务程序是否存在
@@ -275,12 +275,26 @@ stop_service() {
 }
 
 reload_service() {
+	local enabled
+
 	logger -t at-webserver "重新加载配置..."
 	echo "Reloading AT WebServer configuration..."
 
-	# 通过 rc.common/procd 完整停止实例，避免旧实例仍被 procd
-	# 监控时与新实例同时启动并争抢监听端口。
+	config_load at-webserver
+	config_get_bool enabled config enabled 0
+
+	# 禁用服务时只停止现有实例，不再执行 start，避免 disabled 配置触发
+	# 一次无意义的重启或重新配置防火墙。
 	stop
+
+	if [ "$enabled" -eq 0 ]; then
+		logger -t at-webserver "服务已禁用，仅执行停止操作"
+		echo "AT WebServer is disabled; service stopped"
+		return 0
+	fi
+
+	# 通过 rc.common/procd 完整停止实例后再启动，避免旧实例与新实例
+	# 同时运行并争抢监听端口。
 	sleep 1
 	start
 	

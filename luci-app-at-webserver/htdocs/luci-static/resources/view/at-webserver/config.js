@@ -290,7 +290,7 @@ return view.extend({
 		o.rmempty = false;
 		o.default = '0';
 
-		o = s.option(form.Value, 'schedule_airplane_start', _('飞行模式重启时间'),
+		o = s.option(form.Value, 'schedule_airplane_time', _('飞行模式重启时间'),
 			_('自动开关飞行模式的时间，格式：HH:MM'));
 		o.placeholder = '8:00';
 		o.default = '8:00';
@@ -423,23 +423,15 @@ return view.extend({
 		var map = document.querySelector('.cbi-map');
 
 		return this.super('handleSave', [ev]).then(L.bind(function () {
-			// 显式提交 UCI 配置
-			return uci.save().then(function () {
+			// form.Map 已将表单值写入 UCI 临时配置；补写 enabled 后一次性提交。
+			var enabledValue = map.querySelector('input[name="cbid.at-webserver.config.enabled"]');
+			if (enabledValue) {
+				var isEnabled = enabledValue.checked ? '1' : '0';
+				uci.set('at-webserver', 'config', 'enabled', isEnabled);
+			}
+			return uci.save('at-webserver').then(function () {
+				// apply 会提交配置并触发 init 脚本的 procd reload trigger。
 				return uci.apply();
-			}).then(function () {
-				// 强制提交 at-webserver 配置
-				return uci.save('at-webserver');
-			}).then(function () {
-				// 确保 enabled 字段被正确保存
-				var enabledValue = map.querySelector('input[name="cbid.at-webserver.config.enabled"]');
-				if (enabledValue) {
-					var isEnabled = enabledValue.checked ? '1' : '0';
-					uci.set('at-webserver', 'config', 'enabled', isEnabled);
-				}
-				// 等待提交完成后再由 handleSaveApply 重启服务，避免服务读取旧配置。
-				return uci.save('at-webserver').then(function () {
-					return uci.commit('at-webserver');
-				});
 			}).then(function () {
 				ui.addNotification(null, E('p', _('✓ 配置已保存并提交')), 'success');
 			});

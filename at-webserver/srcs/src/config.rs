@@ -138,34 +138,53 @@ pub struct AutoAirPlane {
 pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
     println!("开始从 UCI 加载配置...");
 
-    // 执行 uci 命令
+    // 先确认配置包存在且可由当前进程读取。
     let output = Command::new("uci")
-        .args(&["show", "at-webserver"])
+        .args(["-q", "show", "at-webserver"])
         .output()?;
 
     if !output.status.success() {
-        println!("读取 UCI 配置失败，使用默认配置");
+        eprintln!("读取 UCI 配置失败，使用默认配置");
         return serde_json::from_str(DEFAULT_CONFIG_JSON)
             .map_err(|e| format!("解析默认配置失败: {}", e).into());
     }
 
-    let output_str = String::from_utf8_lossy(&output.stdout);
+    // 不解析 `uci show` 的 shell 转义结果，直接用 `uci get` 读取每个值。
+    // 这样包含空格、引号或反斜杠的配置不会被错误截断，并且读取的是已提交配置。
+    let keys = [
+        "enabled",
+        "connection_type",
+        "network_host",
+        "network_port",
+        "network_timeout",
+        "serial_port",
+        "serial_port_custom",
+        "serial_baudrate",
+        "serial_timeout",
+        "serial_method",
+        "serial_feature",
+        "websocket_port",
+        "websocket_auth_key",
+        "wechat_webhook",
+        "log_file",
+        "notify_sms",
+        "notify_call",
+        "notify_memory_full",
+        "notify_signal",
+        "schedule_auto_airplane_enable",
+        "schedule_airplane_time",
+    ];
     let mut uci_data = HashMap::new();
-
-    // 解析 UCI 输出
-    for line in output_str.trim().lines() {
-        if line.contains('=') {
-            let parts: Vec<&str> = line.splitn(2, '=').collect();
-            if parts.len() == 2 {
-                let key = parts[0];
-                let value = parts[1].trim_matches(|c| c == '\'' || c == '"');
-
-                // 移除前缀 'at-webserver.config.'
-                if key.starts_with("at-webserver.config.") {
-                    let short_key = key.replace("at-webserver.config.", "");
-                    uci_data.insert(short_key, value.to_string());
-                }
-            }
+    for key in keys {
+        let option = format!("at-webserver.config.{key}");
+        let value = Command::new("uci")
+            .args(["-q", "get", &option])
+            .output()?;
+        if value.status.success() {
+            uci_data.insert(
+                key.to_string(),
+                String::from_utf8(value.stdout)?.trim_end().to_string(),
+            );
         }
     }
 
