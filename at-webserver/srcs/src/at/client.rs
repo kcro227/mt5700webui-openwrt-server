@@ -49,28 +49,26 @@ async fn drain_stale_data(conn: &mut Box<dyn ATConnection>) {
 }
 
 pub struct ATClient {
+    pub config: Arc<Config>,
     pub conn: Arc<Mutex<Box<dyn ATConnection>>>,
     pub urc_tx: broadcast::Sender<String>,
 }
 
 impl ATClient {
-    pub fn new(config: &Arc<Config>) -> Result<Self, Box<dyn Error>> {
+    pub fn new(config: Arc<Config>) -> Result<Self, Box<dyn Error>> {
         let at_config = &config.at_config;
 
         let conn: Box<dyn ATConnection> = if at_config.conn_type == "NETWORK" {
-            Box::new(NetworkATConn::new(at_config.network.clone()))
+            Box::new(NetworkATConn::new(config.clone()))
         } else if at_config.serial.method == "TOM_MODEM" {
-            Box::new(TomModemATConn::new(
-                at_config.serial.port.clone(),
-                at_config.serial.timeout,
-                at_config.serial.feature.clone(),
-            ))
+            Box::new(TomModemATConn::new(config.clone()))
         } else {
-            Box::new(SerialATConn::new(at_config.serial.clone()))
+            Box::new(SerialATConn::new(config.clone()))
         };
 
         let (tx, _) = broadcast::channel(1024);
         Ok(Self {
+            config,
             conn: Arc::new(Mutex::new(conn)),
             urc_tx: tx,
         })

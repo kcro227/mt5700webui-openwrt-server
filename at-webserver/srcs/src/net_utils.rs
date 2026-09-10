@@ -61,25 +61,3 @@ pub async fn create_ipv4_listener(host: &str, port: u16) -> Result<TcpListener, 
     socket.bind(SocketAddr::new(IpAddr::V4(ipv4_addr), port))?;
     Ok(socket.listen(1024)?)
 }
-
-/// 备用方案：使用std::net创建监听器，然后转换为tokio的TcpListener
-#[allow(dead_code)]
-pub async fn create_dual_stack_listener_alt(
-    host: &str,
-    port: u16,
-) -> Result<TcpListener, Box<dyn Error>> {
-    use std::net::TcpListener as StdTcpListener;
-
-    let ipv6_addr = if host == "::" {
-        Ipv6Addr::UNSPECIFIED
-    } else {
-        Ipv6Addr::from_str(host).map_err(|e| format!("无效的IPv6地址: {}", e))?
-    };
-
-    let socket_addr = std::net::SocketAddr::new(IpAddr::V6(ipv6_addr), port);
-
-    let std_listener = StdTcpListener::bind(socket_addr)?;
-    std_listener.set_nonblocking(true)?;
-    let listener = TcpListener::from_std(std_listener)?;
-    Ok(listener)
-}

@@ -1,13 +1,16 @@
 use async_trait::async_trait;
 use std::error::Error;
 use std::io::ErrorKind;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_serial::{SerialPortBuilderExt, SerialStream};
 
-use crate::config::{NetworkConfig, SerialConfig};
+use crate::config::Config;
+
+const IDLE_READ_TIMEOUT: Duration = Duration::from_millis(100);
 
 fn should_reset_connection(error: &std::io::Error) -> bool {
     matches!(
@@ -65,12 +68,12 @@ pub trait ATConnection: Send {
 // ========== 串口连接实现 ==========
 
 pub struct SerialATConn {
-    pub config: SerialConfig,
+    pub config: Arc<Config>,
     stream: Option<SerialStream>,
 }
 
 impl SerialATConn {
-    pub fn new(config: SerialConfig) -> Self {
+    pub fn new(config: Arc<Config>) -> Self {
         Self {
             config,
             stream: None,
@@ -81,8 +84,9 @@ impl SerialATConn {
 #[async_trait]
 impl ATConnection for SerialATConn {
     async fn connect(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let port = tokio_serial::new(&self.config.port, self.config.baudrate)
-            .timeout(Duration::from_secs(self.config.timeout))
+        let serial = &self.config.at_config.serial;
+        let port = tokio_serial::new(&serial.port, serial.baudrate)
+            .timeout(Duration::from_secs(serial.timeout))
             .open_native_async()?;
         self.stream = Some(port);
         Ok(())
@@ -107,7 +111,7 @@ impl ATConnection for SerialATConn {
 
     async fn receive(&mut self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
         if let Some(stream) = &mut self.stream {
-            match read_with_timeout(stream, Duration::from_millis(25)).await {
+            match read_with_timeout(stream, IDLE_READ_TIMEOUT).await {
                 Ok(data) => Ok(data),
                 Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
                     Ok(Vec::new())
@@ -133,12 +137,12 @@ impl ATConnection for SerialATConn {
 // ========== 网络 TCP 连接实现 ==========
 
 pub struct NetworkATConn {
-    pub config: NetworkConfig,
+    pub config: Arc<Config>,
     stream: Option<TcpStream>,
 }
 
 impl NetworkATConn {
-    pub fn new(config: NetworkConfig) -> Self {
+    pub fn new(config: Arc<Config>) -> Self {
         Self {
             config,
             stream: None,
@@ -149,9 +153,10 @@ impl NetworkATConn {
 #[async_trait]
 impl ATConnection for NetworkATConn {
     async fn connect(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let addr = format!("{}:{}", self.config.host, self.config.port);
+        let network = &self.config.at_config.network;
+        let addr = format!("{}:{}", network.host, network.port);
         let stream = timeout(
-            Duration::from_secs(self.config.timeout),
+            Duration::from_secs(network.timeout),
             TcpStream::connect(addr),
         )
         .await??;
@@ -178,7 +183,7 @@ impl ATConnection for NetworkATConn {
 
     async fn receive(&mut self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
         if let Some(stream) = &mut self.stream {
-            match read_with_timeout(stream, Duration::from_millis(25)).await {
+            match read_with_timeout(stream, IDLE_READ_TIMEOUT).await {
                 Ok(data) => Ok(data),
                 Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
                     Ok(Vec::new())
@@ -204,19 +209,15 @@ impl ATConnection for NetworkATConn {
 // ========== TomModem 外部命令实现 ==========
 
 pub struct TomModemATConn {
-    pub port: String,
-    pub timeout: u64,
-    pub feature: String,
+    pub config: Arc<Config>,
     is_connected: bool,
     response: Option<String>,
 }
 
 impl TomModemATConn {
-    pub fn new(port: String, timeout: u64, feature: String) -> Self {
+    pub fn new(config: Arc<Config>) -> Self {
         Self {
-            port,
-            timeout,
-            feature,
+            config,
             is_connected: false,
             response: None,
         }
@@ -236,14 +237,15 @@ impl ATConnection for TomModemATConn {
         }
 
         let command = String::from_utf8_lossy(data).trim().to_string();
-        let mut args = vec![self.port.clone(), "-c".to_string(), command.clone()];
+        let serial = &self.config.at_config.serial;
+        let mut args = vec![serial.port.clone(), "-c".to_string(), command.clone()];
 
-        if !self.feature.is_empty() && self.feature != "NONE" {
-            args.push(format!("-{}", self.feature));
+        if !serial.feature.is_empty() && serial.feature != "NONE" {
+            args.push(format!("-{}", serial.feature));
         }
 
         let output = timeout(
-            Duration::from_secs(self.timeout),
+            Duration::from_secs(serial.timeout),
             tokio::process::Command::new("tom_modem").args(&args).output(),
         )
         .await??;
@@ -259,13 +261,11 @@ impl ATConnection for TomModemATConn {
     }
 
     async fn receive(&mut self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
-        if let Some(response) = &self.response {
-            let data = response.clone().into_bytes();
-            self.response = None;
-            Ok(data)
-        } else {
-            Ok(Vec::new())
-        }
+        Ok(self
+            .response
+            .take()
+            .map(String::into_bytes)
+            .unwrap_or_default())
     }
 
     fn is_connected(&self) -> bool {

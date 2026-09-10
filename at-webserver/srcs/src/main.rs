@@ -3,7 +3,6 @@ use std::time::Duration;
 use tokio::time::interval;
 
 mod config;
-mod error;
 mod at;
 mod airplane;
 mod websocket;
@@ -17,7 +16,10 @@ use net_utils::{create_dual_stack_listener, create_ipv4_listener};
 fn is_urc_line(line: &str) -> bool {
     let trimmed = line.trim();
     !trimmed.is_empty()
-        && !trimmed.to_lowercase().contains("ping")
+        && !trimmed
+            .as_bytes()
+            .windows(4)
+            .any(|window| window.eq_ignore_ascii_case(b"ping"))
         && (trimmed.contains('^') || trimmed.contains('+'))
 }
 
@@ -39,11 +41,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 创建AT客户端
     // let at_client = Arc::new(ATClient::new(config.clone())?);
-    let at_client = Arc::new(ATClient::new(&config)?);
+    let at_client = Arc::new(ATClient::new(config.clone())?);
 
 
     // 创建自动重启飞行模式监控
-    let auto_flight_mode = AutoAirPlaneMode::new(at_client.clone(), config.clone());
+    let auto_flight_mode = AutoAirPlaneMode::new(at_client.clone());
     if auto_flight_mode.is_enbale() {
         auto_flight_mode.monitor_loop().await;
     }
@@ -116,15 +118,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             if !has_data {
-                tokio::task::yield_now().await;
+                // Avoid a hot polling loop when the modem has no URC data.
+                tokio::time::sleep(Duration::from_millis(20)).await;
             }
         }
     });
 
     // 获取WebSocket配置
-    let ws_v6_host = config.websocket_config.ipv6.host.clone();
+    let ws_v6_host = &config.websocket_config.ipv6.host;
     let ws_v6_port = config.websocket_config.ipv6.port;
-    let auth_key = config.websocket_config.auth_key.clone();
 
     // 尝试绑定IPv6双栈监听器
     println!("尝试绑定IPv6双栈监听器...");
@@ -161,24 +163,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("AT WebSocket 服务器启动成功！");
     println!("监听端口: {}", ws_v6_port);
     println!("支持协议: IPv4 和 IPv6 (双栈)");
-    if !auth_key.is_empty() {
-        println!("认证模式: 已启用 (密钥长度: {})", auth_key.len());
+    if !config.websocket_config.auth_key.is_empty() {
+        println!("认证模式: 已启用 (密钥长度: {})", config.websocket_config.auth_key.len());
     } else {
         println!("认证模式: 未启用 (允许无密钥访问)");
     }
     println!("--------------------------------------");
-
-    let client = at_client.clone();
 
     // 启动WebSocket服务器
     println!("WebSocket 服务器运行中...");
     loop {
         match ws_listener.accept().await {
             Ok((stream, addr)) => {
-                let client = client.clone();
-                let auth_key = auth_key.clone();
+                let client = at_client.clone();
+                let config = config.clone();
                 tokio::spawn(async move {
-                    let _ = websocket::handle_connection(stream, addr, client, auth_key).await;
+                    let _ = websocket::handle_connection(stream, addr, client, config).await;
                 });
             }
             Err(e) => {
@@ -287,7 +287,7 @@ fn print_config_summary(config: &Config) {
         if config.auto_airplane.action_time.is_empty() {
             "未设置".to_string()
         } else {
-            config.auto_airplane.action_time.clone()
+            config.auto_airplane.action_time.to_string()
         }
     );
 

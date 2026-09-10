@@ -6,47 +6,36 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 use crate::at::ATClient;
-use crate::config::Config;
 
 /// 自动开关飞行模式功能
 pub struct AutoAirPlaneMode {
     client: Arc<ATClient>,
-    enabled: bool,
-    action_time: String,
 }
 
 impl AutoAirPlaneMode {
-    pub fn new(client: Arc<ATClient>, config: Arc<Config>) -> Self {
-        let auto_airplane = &config.auto_airplane;
-
-        let mode = Self {
-            client,
-            enabled: auto_airplane.enabled,
-            action_time: auto_airplane.action_time.clone(),
-        };
-
-        if mode.enabled {
+    pub fn new(client: Arc<ATClient>) -> Self {
+        if client.config.auto_airplane.enabled {
             println!("{}", "=".repeat(60));
             println!("自动开关飞行模式功能已启用");
-            println!("  操作时间: {}", mode.action_time);
+            println!("  操作时间: {}", client.config.auto_airplane.action_time);
             println!("{}", "=".repeat(60));
         }
 
-        mode
+        Self { client }
     }
 
     pub fn is_enbale(&self) -> bool {
-        if self.enabled
-        {
-            return true;
-        }
-        else {
-            false
-        }
+        self.client.config.auto_airplane.enabled
     }
 
     fn parse_action_time(&self) -> Result<(u32, u32), Box<dyn Error + Send + Sync>> {
-        let parts: Vec<&str> = self.action_time.split(':').collect();
+        let parts: Vec<&str> = self
+            .client
+            .config
+            .auto_airplane
+            .action_time
+            .split(':')
+            .collect();
         if parts.len() != 2 {
             return Err("无效的时间格式，需为 HH:MM".into());
         }
@@ -83,7 +72,7 @@ impl AutoAirPlaneMode {
             }
 
             // 等待10秒
-            sleep(Duration::from_secs(5)).await;
+            sleep(Duration::from_secs(15)).await;
 
             // 打开飞行模式 (CFUN=1 关闭飞行模式)
             match client.send_command("AT+CFUN=1".into()).await {
@@ -102,7 +91,7 @@ impl AutoAirPlaneMode {
     pub async fn monitor_loop(self) {
         tokio::spawn(async move {
             loop {
-                if self.enabled {
+                if self.is_enbale() {
                     let now = Utc::now().with_timezone(&Shanghai);
                     println!("当前时间: {}", now.format("%H:%M"));
 

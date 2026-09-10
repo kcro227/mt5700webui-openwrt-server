@@ -7,13 +7,14 @@ use tokio::time::timeout;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use crate::at::ATClient;
+use crate::config::Config;
 
 /// WebSocket 连接处理器
 pub async fn handle_connection(
     stream: TcpStream,
     addr: std::net::SocketAddr,
     client: Arc<ATClient>,
-    auth_key: String,
+    config: Arc<Config>,
 ) -> Option<()> {
     let ws_stream = accept_async(stream).await.ok()?;
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
@@ -22,13 +23,13 @@ pub async fn handle_connection(
     println!("[WebSocket] 新连接: {}", addr);
 
     // 如果配置了认证密钥，需要先进行认证
-    if !auth_key.is_empty() {
+    if !config.websocket_config.auth_key.is_empty() {
         let auth_result = timeout(Duration::from_secs(10), async {
             if let Some(Ok(Message::Text(auth_msg))) = ws_rx.next().await {
                 let auth_data: Result<serde_json::Value, _> = serde_json::from_str(&auth_msg);
                 if let Ok(auth_data) = auth_data {
                     if let Some(client_key) = auth_data.get("auth_key") {
-                        if client_key.as_str() == Some(&auth_key) {
+                        if client_key.as_str() == Some(&config.websocket_config.auth_key) {
                             return true;
                         }
                     }

@@ -39,7 +39,7 @@ pub const DEFAULT_CONFIG_JSON: &str = r#"{
 
 // ========== 配置结构体定义 ==========
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     #[serde(rename = "AT_CONFIG")]
     pub at_config: AtConfig,
@@ -51,7 +51,7 @@ pub struct Config {
     pub auto_airplane: AutoAirPlane,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AtConfig {
     #[serde(rename = "TYPE")]
     pub conn_type: String,
@@ -61,7 +61,7 @@ pub struct AtConfig {
     pub serial: SerialConfig,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NetworkConfig {
     #[serde(rename = "HOST")]
     pub host: String,
@@ -71,7 +71,7 @@ pub struct NetworkConfig {
     pub timeout: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SerialConfig {
     #[serde(rename = "PORT")]
     pub port: String,
@@ -85,7 +85,7 @@ pub struct SerialConfig {
     pub feature: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WsConfig {
     #[serde(rename = "IPV4")]
     pub ipv4: WsEndpoint,
@@ -95,7 +95,7 @@ pub struct WsConfig {
     pub auth_key: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WsEndpoint {
     #[serde(rename = "HOST")]
     pub host: String,
@@ -103,7 +103,7 @@ pub struct WsEndpoint {
     pub port: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NotificationConfig {
     #[serde(rename = "WECHAT_WEBHOOK")]
     pub wechat_webhook: String,
@@ -113,7 +113,7 @@ pub struct NotificationConfig {
     pub notification_types: NotificationTypes,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NotificationTypes {
     #[serde(rename = "SMS")]
     pub sms: bool,
@@ -125,7 +125,7 @@ pub struct NotificationTypes {
     pub signal: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AutoAirPlane {
     #[serde(rename = "ENABLED")]
     pub enabled: bool,
