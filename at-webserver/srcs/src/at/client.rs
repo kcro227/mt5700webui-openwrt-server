@@ -85,7 +85,7 @@ impl ATClient {
 
         drain_stale_data(&mut conn).await;
 
-        println!("[DEBUG] ==> TX: {:?}", command);
+        crate::log_debug!("[DEBUG] ==> TX: {:?}", command);
         conn.send(command.as_bytes()).await?;
 
         let mut raw_response = String::new();
@@ -106,7 +106,7 @@ impl ATClient {
         }
 
         let result = sanitize_response(&raw_response, &original_cmd);
-        println!("[DEBUG] <== RX: {:?}", result);
+        crate::log_debug!("[DEBUG] <== RX: {:?}", result);
 
         if result.contains("ERROR") {
             return Err("ERROR".into());

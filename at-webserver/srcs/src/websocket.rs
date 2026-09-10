@@ -20,7 +20,7 @@ pub async fn handle_connection(
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let mut urc_rx = client.urc_tx.subscribe();
 
-    println!("[WebSocket] 新连接: {}", addr);
+    crate::log_info!("[WebSocket] 新连接: {}", addr);
 
     // 如果配置了认证密钥，需要先进行认证
     if !config.websocket_config.auth_key.is_empty() {
@@ -41,7 +41,7 @@ pub async fn handle_connection(
         .unwrap_or(false);
 
         if !auth_result {
-            println!("[WebSocket] 认证失败: {}", addr);
+            crate::log_warn!("[WebSocket] 认证失败: {}", addr);
             let _ = ws_tx
                 .send(Message::Text(
                     json!({
@@ -64,7 +64,7 @@ pub async fn handle_connection(
                 .to_string(),
             ))
             .await;
-        println!("[WebSocket] 认证成功: {}", addr);
+        crate::log_info!("[WebSocket] 认证成功: {}", addr);
     }
 
     loop {
@@ -88,6 +88,6 @@ pub async fn handle_connection(
             }
         }
     }
-    println!("[WebSocket] 连接断开: {}", addr);
+    crate::log_info!("[WebSocket] 连接断开: {}", addr);
     Some(())
 }

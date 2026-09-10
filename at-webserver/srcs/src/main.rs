@@ -3,6 +3,7 @@ use std::time::Duration;
 use tokio::time::interval;
 
 mod config;
+mod logger;
 mod at;
 mod airplane;
 mod websocket;
@@ -29,12 +30,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = match load_config_from_uci() {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("从UCI加载配置失败: {}, 使用默认配置", e);
+            crate::log_error!("从UCI加载配置失败: {}, 使用默认配置", e);
             serde_json::from_str(DEFAULT_CONFIG_JSON)?
         }
     };
 
     let config = Arc::new(config);
+    logger::init(
+        config.logging.enabled,
+        &config.logging.level,
+    );
 
     // 打印配置信息
     print_config_summary(&config);
@@ -64,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match conn.send(b"ping\r\n").await {
                 Ok(_) => {}
                 Err(err) => {
-                    eprintln!("[AT] 心跳探测失败: {}", err);
+                    crate::log_error!("[AT] 心跳探测失败: {}", err);
                 }
             }
         }
@@ -81,13 +86,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut conn = c_monitor.conn.lock().await;
                 if !conn.is_connected() {
                     if was_connected {
-                        println!("[AT] 连接已断开，正在重连...");
+                        crate::log_warn!("[AT] 连接已断开，正在重连...");
                         was_connected = false;
                     }
                     if last_reconnect_attempt.elapsed() >= Duration::from_secs(2) {
                         last_reconnect_attempt = std::time::Instant::now();
                         if let Ok(_) = conn.connect().await {
-                            println!("[AT] 连接已恢复");
+                            crate::log_info!("[AT] 连接已恢复");
                             was_connected = true;
                             drop(conn);
                             let c_init = c_monitor.clone();
@@ -102,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let text = String::from_utf8_lossy(&data).to_string();
                                 for line in text.lines() {
                                     if is_urc_line(line) {
-                                        println!("[URC DETECTED] <== {:?}", line);
+                                        crate::log_debug!("[URC DETECTED] <== {:?}", line);
                                         let _ = c_monitor.urc_tx.send(line.to_string());
                                     }
                                 }
@@ -110,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         Err(_) => {
                             if was_connected {
-                                println!("[AT] 连接已断开，正在重连...");
+                                crate::log_warn!("[AT] 连接已断开，正在重连...");
                                 was_connected = false;
                             }
                         }
@@ -129,10 +134,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ws_v6_port = config.websocket_config.ipv6.port;
 
     // 尝试绑定IPv6双栈监听器
-    println!("尝试绑定IPv6双栈监听器...");
+    crate::log_info!("尝试绑定IPv6双栈监听器...");
     let ws_listener = match create_dual_stack_listener(&ws_v6_host, ws_v6_port).await {
         Ok(listener) => {
-            println!(
+            crate::log_info!(
                 "✓ 成功绑定IPv6双栈监听器: [{}]:{}",
                 if ws_v6_host == "::" { "::" } else { &ws_v6_host },
                 ws_v6_port
@@ -140,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             listener
         }
         Err(e) => {
-            println!("⚠ 无法绑定IPv6双栈监听器: {}, 尝试绑定IPv4...", e);
+            crate::log_warn!("无法绑定IPv6双栈监听器: {}, 尝试绑定IPv4...", e);
             // 回退到只绑定IPv4
             let ws_v4_addr = format!(
                 "{}:{}",
@@ -148,30 +153,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             match create_ipv4_listener(&config.websocket_config.ipv4.host, config.websocket_config.ipv4.port).await {
                 Ok(listener) => {
-                    println!("✓ 成功绑定IPv4监听器: {}", ws_v4_addr);
+                    crate::log_info!("成功绑定IPv4监听器: {}", ws_v4_addr);
                     listener
                 }
                 Err(e) => {
-                    eprintln!("❌ 无法绑定IPv4监听器 {}: {}", ws_v4_addr, e);
+                    crate::log_error!("无法绑定IPv4监听器 {}: {}", ws_v4_addr, e);
                     return Err(e.into());
                 }
             }
         }
     };
 
-    println!("--------------------------------------");
-    println!("AT WebSocket 服务器启动成功！");
-    println!("监听端口: {}", ws_v6_port);
-    println!("支持协议: IPv4 和 IPv6 (双栈)");
+    crate::log_info!("--------------------------------------");
+    crate::log_info!("AT WebSocket 服务器启动成功！");
+    crate::log_info!("监听端口: {}", ws_v6_port);
+    crate::log_info!("支持协议: IPv4 和 IPv6 (双栈)");
     if !config.websocket_config.auth_key.is_empty() {
-        println!("认证模式: 已启用 (密钥长度: {})", config.websocket_config.auth_key.len());
+        crate::log_info!("认证模式: 已启用 (密钥长度: {})", config.websocket_config.auth_key.len());
     } else {
-        println!("认证模式: 未启用 (允许无密钥访问)");
+        crate::log_info!("认证模式: 未启用 (允许无密钥访问)");
     }
-    println!("--------------------------------------");
+    crate::log_info!("--------------------------------------");
 
     // 启动WebSocket服务器
-    println!("WebSocket 服务器运行中...");
+    crate::log_info!("WebSocket 服务器运行中...");
     loop {
         match ws_listener.accept().await {
             Ok((stream, addr)) => {
@@ -182,7 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
             }
             Err(e) => {
-                eprintln!("接受连接失败: {}", e);
+                crate::log_error!("接受连接失败: {}", e);
                 break;
             }
         }
@@ -193,30 +198,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// 打印配置摘要
 fn print_config_summary(config: &Config) {
-    println!("{}", "=".repeat(60));
-    println!("当前运行配置:");
-    println!("{}", "=".repeat(60));
-    println!("连接类型: {}", config.at_config.conn_type);
+    crate::log_info!("{}", "=".repeat(60));
+    crate::log_info!("当前运行配置:");
+    crate::log_info!("{}", "=".repeat(60));
+    crate::log_info!("连接类型: {}", config.at_config.conn_type);
 
     if config.at_config.conn_type == "NETWORK" {
-        println!(
+        crate::log_info!(
             "  网络地址: {}:{}",
             config.at_config.network.host, config.at_config.network.port
         );
-        println!("  网络超时: {}秒", config.at_config.network.timeout);
+        crate::log_info!("  网络超时: {}秒", config.at_config.network.timeout);
     } else {
-        println!("  串口设备: {}", config.at_config.serial.port);
-        println!("  波特率: {}", config.at_config.serial.baudrate);
-        println!("  串口超时: {}秒", config.at_config.serial.timeout);
-        println!("  串口方法: {}", config.at_config.serial.method);
-        println!("  串口功能: {}", config.at_config.serial.feature);
+        crate::log_info!("  串口设备: {}", config.at_config.serial.port);
+        crate::log_info!("  波特率: {}", config.at_config.serial.baudrate);
+        crate::log_info!("  串口超时: {}秒", config.at_config.serial.timeout);
+        crate::log_info!("  串口方法: {}", config.at_config.serial.method);
+        crate::log_info!("  串口功能: {}", config.at_config.serial.feature);
     }
 
-    println!("\nWebSocket 配置:");
-    println!("  监听端口: {}", config.websocket_config.ipv4.port);
-    println!("  IPv4 绑定: {}", config.websocket_config.ipv4.host);
-    println!("  IPv6 绑定: {}", config.websocket_config.ipv6.host);
-    println!(
+    crate::log_info!("\nWebSocket 配置:");
+    crate::log_info!("  监听端口: {}", config.websocket_config.ipv4.port);
+    crate::log_info!("  IPv4 绑定: {}", config.websocket_config.ipv4.host);
+    crate::log_info!("  IPv6 绑定: {}", config.websocket_config.ipv6.host);
+    crate::log_info!(
         "  认证密钥: {}",
         if config.websocket_config.auth_key.is_empty() {
             "无"
@@ -225,8 +230,19 @@ fn print_config_summary(config: &Config) {
         }
     );
 
-    println!("\n通知配置:");
-    println!(
+    crate::log_info!("\n运行日志:");
+    crate::log_info!(
+        "  状态: {}",
+        if config.logging.enabled {
+            "启用"
+        } else {
+            "禁用"
+        }
+    );
+    crate::log_info!("  级别: {}", config.logging.level);
+
+    crate::log_info!("\n通知配置:");
+    crate::log_info!(
         "  企业微信: {}",
         if config.notification_config.wechat_webhook.is_empty() {
             "未启用"
@@ -234,7 +250,7 @@ fn print_config_summary(config: &Config) {
             "已启用"
         }
     );
-    println!(
+    crate::log_info!(
         "  日志文件: {}",
         if config.notification_config.log_file.is_empty() {
             "未启用"
@@ -243,8 +259,8 @@ fn print_config_summary(config: &Config) {
         }
     );
 
-    println!("  通知类型:");
-    println!(
+    crate::log_info!("  通知类型:");
+    crate::log_info!(
         "    - 短信通知: {}",
         if config.notification_config.notification_types.sms {
             "✓ 启用"
@@ -252,7 +268,7 @@ fn print_config_summary(config: &Config) {
             "✗ 禁用"
         }
     );
-    println!(
+    crate::log_info!(
         "    - 来电通知: {}",
         if config.notification_config.notification_types.call {
             "✓ 启用"
@@ -260,7 +276,7 @@ fn print_config_summary(config: &Config) {
             "✗ 禁用"
         }
     );
-    println!(
+    crate::log_info!(
         "    - 存储满通知: {}",
         if config.notification_config.notification_types.memory_full {
             "✓ 启用"
@@ -268,7 +284,7 @@ fn print_config_summary(config: &Config) {
             "✗ 禁用"
         }
     );
-    println!(
+    crate::log_info!(
         "    - 信号通知: {}",
         if config.notification_config.notification_types.signal {
             "✓ 启用"
@@ -277,12 +293,12 @@ fn print_config_summary(config: &Config) {
         }
     );
 
-    println!("\n自动重启飞行模式配置:");
-    println!(
+    crate::log_info!("\n自动重启飞行模式配置:");
+    crate::log_info!(
         "  启用: {}",
         if config.auto_airplane.enabled { "是" } else { "否" }
     );
-    println!(
+    crate::log_info!(
         "重启执行时间：{} ",
         if config.auto_airplane.action_time.is_empty() {
             "未设置".to_string()
@@ -291,5 +307,5 @@ fn print_config_summary(config: &Config) {
         }
     );
 
-    println!("{}", "=".repeat(60));
+    crate::log_info!("{}", "=".repeat(60));
 }

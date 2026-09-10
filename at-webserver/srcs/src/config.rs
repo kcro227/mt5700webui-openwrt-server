@@ -34,6 +34,10 @@ pub const DEFAULT_CONFIG_JSON: &str = r#"{
     "SCHEDULE_AIRPLANE_CONFIG": {
         "ENABLED": false,
         "ACTION_TIME": "8:00"
+    },
+    "LOG_CONFIG": {
+        "ENABLED": true,
+        "LEVEL": "INFO"
     }
 }"#;
 
@@ -49,6 +53,8 @@ pub struct Config {
     pub notification_config: NotificationConfig,
     #[serde(rename = "SCHEDULE_AIRPLANE_CONFIG")]
     pub auto_airplane: AutoAirPlane,
+    #[serde(rename = "LOG_CONFIG")]
+    pub logging: LoggingConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -133,10 +139,18 @@ pub struct AutoAirPlane {
     pub action_time: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    #[serde(rename = "ENABLED")]
+    pub enabled: bool,
+    #[serde(rename = "LEVEL")]
+    pub level: String,
+}
+
 // ========== 从 UCI 加载配置 ==========
 
 pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
-    println!("开始从 UCI 加载配置...");
+    crate::log_info!("开始从 UCI 加载配置...");
 
     // 先确认配置包存在且可由当前进程读取。
     let output = Command::new("uci")
@@ -144,7 +158,7 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
         .output()?;
 
     if !output.status.success() {
-        eprintln!("读取 UCI 配置失败，使用默认配置");
+        crate::log_error!("读取 UCI 配置失败，使用默认配置");
         return serde_json::from_str(DEFAULT_CONFIG_JSON)
             .map_err(|e| format!("解析默认配置失败: {}", e).into());
     }
@@ -173,6 +187,8 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
         "notify_signal",
         "schedule_auto_airplane_enable",
         "schedule_airplane_time",
+        "log_enabled",
+        "log_level",
     ];
     let mut uci_data = HashMap::new();
     for key in keys {
@@ -189,17 +205,17 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
     }
 
     // 从默认配置开始
-    println!("使用默认配置初始化...");
+    crate::log_info!("使用默认配置初始化...");
     let mut config: Config = serde_json::from_str(DEFAULT_CONFIG_JSON)?;
 
-    println!("开始从 UCI 加载配置...");
+    crate::log_info!("开始从 UCI 加载配置...");
     // 读取连接类型
     let conn_type = uci_data
         .get("connection_type")
         .map(|s| s.as_str())
         .unwrap_or("NETWORK");
     config.at_config.conn_type = conn_type.to_string();
-    println!("配置加载: 连接类型 = {}", conn_type);
+    crate::log_info!("配置加载: 连接类型 = {}", conn_type);
 
     // 读取网络配置
     if conn_type == "NETWORK" {
@@ -219,7 +235,7 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
         config.at_config.network.host = host.to_string();
         config.at_config.network.port = port;
         config.at_config.network.timeout = timeout;
-        println!("配置加载: 网络连接 {}:{} (超时: {}秒)", host, port, timeout);
+        crate::log_info!("配置加载: 网络连接 {}:{} (超时: {}秒)", host, port, timeout);
     } else {
         // 读取串口配置
         let mut port = uci_data
@@ -263,11 +279,11 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
         config.at_config.serial.method = method.to_string();
         config.at_config.serial.feature = feature.to_string();
 
-        println!(
+        crate::log_info!(
             "配置加载: 串口连接 {} @ {} bps (超时: {}秒)",
             port, baudrate, timeout
         );
-        println!("配置加载: 串口方法 = {}, 功能 = {}", method, feature);
+        crate::log_info!("配置加载: 串口方法 = {}, 功能 = {}", method, feature);
     }
 
     // 读取 WebSocket 端口
@@ -298,12 +314,12 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
     // 读取通知配置
     if let Some(wechat_webhook) = uci_data.get("wechat_webhook") {
         config.notification_config.wechat_webhook = wechat_webhook.clone();
-        println!("配置加载: 企业微信推送已启用");
+        crate::log_info!("配置加载: 企业微信推送已启用");
     }
 
     if let Some(log_file) = uci_data.get("log_file") {
         config.notification_config.log_file = log_file.clone();
-        println!("配置加载: 日志文件 = {}", log_file);
+        crate::log_info!("配置加载: 日志文件 = {}", log_file);
     }
 
     // 读取通知类型开关
@@ -329,7 +345,7 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
             .unwrap_or("8:00")
             .to_string();
 
-        println!(
+        crate::log_info!(
             "配置加载: 自动开关飞行模式 = {} (时间: {})",
             if enabled { "启用" } else { "禁用" },
             action_time
@@ -339,6 +355,13 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
         config.auto_airplane.action_time = action_time;
     }
 
-    println!("✓ UCI 配置加载完成");
+    if let Some(enabled) = uci_data.get("log_enabled") {
+        config.logging.enabled = enabled == "1";
+    }
+    if let Some(level) = uci_data.get("log_level") {
+        config.logging.level = level.to_ascii_uppercase();
+    }
+
+    crate::log_info!("✓ UCI 配置加载完成");
     Ok(config)
 }

@@ -15,10 +15,10 @@ pub struct AutoAirPlaneMode {
 impl AutoAirPlaneMode {
     pub fn new(client: Arc<ATClient>) -> Self {
         if client.config.auto_airplane.enabled {
-            println!("{}", "=".repeat(60));
-            println!("自动开关飞行模式功能已启用");
-            println!("  操作时间: {}", client.config.auto_airplane.action_time);
-            println!("{}", "=".repeat(60));
+            crate::log_info!("{}", "=".repeat(60));
+            crate::log_info!("自动开关飞行模式功能已启用");
+            crate::log_info!("  操作时间: {}", client.config.auto_airplane.action_time);
+            crate::log_info!("{}", "=".repeat(60));
         }
 
         Self { client }
@@ -60,15 +60,15 @@ impl AutoAirPlaneMode {
     fn restart_airplane_mode(&self) {
         let client = self.client.clone();
         tokio::spawn(async move {
-            println!(
+            crate::log_info!(
                 "[{}] 自动重启飞行模式开始...",
                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
             );
 
             // 关闭飞行模式 (CFUN=0 开启飞行模式)
             match client.send_command("AT+CFUN=0".into()).await {
-                Ok(_) => println!("飞行模式已开启"),
-                Err(e) => println!("开启飞行模式失败: {}", e),
+                Ok(_) => crate::log_info!("飞行模式已开启"),
+                Err(e) => crate::log_error!("开启飞行模式失败: {}", e),
             }
 
             // 等待10秒
@@ -76,11 +76,11 @@ impl AutoAirPlaneMode {
 
             // 打开飞行模式 (CFUN=1 关闭飞行模式)
             match client.send_command("AT+CFUN=1".into()).await {
-                Ok(_) => println!("飞行模式已关闭"),
-                Err(e) => println!("关闭飞行模式失败: {}", e),
+                Ok(_) => crate::log_info!("飞行模式已关闭"),
+                Err(e) => crate::log_error!("关闭飞行模式失败: {}", e),
             }
 
-            println!(
+            crate::log_info!(
                 "[{}] 自动重启飞行模式完成",
                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
             );
@@ -93,7 +93,7 @@ impl AutoAirPlaneMode {
             loop {
                 if self.is_enbale() {
                     let now = Utc::now().with_timezone(&Shanghai);
-                    println!("当前时间: {}", now.format("%H:%M"));
+                    crate::log_debug!("当前时间: {}", now.format("%H:%M"));
 
                     if self.is_action_time(&now) {
                         self.restart_airplane_mode();

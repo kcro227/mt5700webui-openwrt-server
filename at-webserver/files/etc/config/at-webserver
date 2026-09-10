@@ -20,6 +20,8 @@ config at-webserver 'config'
 	# 通知配置
 	option wechat_webhook ''
 	option log_file ''
+	option log_enabled '1'
+	option log_level 'INFO'
 	option notify_sms '1'
 	option notify_call '1'
 	option notify_memory_full '1'
@@ -68,4 +70,3 @@ config at-webserver 'config'
 	# option schedule_day_nr_arfcns ''         # NR频点
 	# option schedule_day_nr_scs_types ''      # NR SCS类型
 	# option schedule_day_nr_pcis ''           # NR PCI
-

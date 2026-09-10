@@ -251,6 +251,20 @@ return view.extend({
 			_('保存通知记录的日志文件路径，留空则不启用日志记录'));
 		o.placeholder = '/var/log/at-notifications.log';
 
+		o = s.option(form.Flag, 'log_enabled', _('启用运行日志'),
+			_('控制服务日志输出。关闭后不输出普通运行日志和调试日志'));
+		o.default = '1';
+		o.rmempty = false;
+
+		o = s.option(form.ListValue, 'log_level', _('日志级别'),
+			_('仅输出不低于所选级别的日志：ERROR、WARN、INFO、DEBUG'));
+		o.value('ERROR', _('错误'));
+		o.value('WARN', _('警告'));
+		o.value('INFO', _('信息'));
+		o.value('DEBUG', _('调试'));
+		o.default = 'INFO';
+		o.rmempty = false;
+
 		// 通知类型标题（使用 DummyValue 作为分隔）
 		o = s.option(form.DummyValue, '_notify_types_title', _('通知类型'));
 		o.rawhtml = true;
