@@ -8,6 +8,8 @@ mod at;
 mod airplane;
 mod websocket;
 mod net_utils;
+mod netmon;
+mod notify;
 
 use config::{load_config_from_uci, Config, DEFAULT_CONFIG_JSON};
 use at::ATClient;
@@ -16,12 +18,28 @@ use net_utils::{create_dual_stack_listener, create_ipv4_listener};
 
 fn is_urc_line(line: &str) -> bool {
     let trimmed = line.trim();
-    !trimmed.is_empty()
-        && !trimmed
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // 心跳回显 / 自定义文本不是 URC
+    if trimmed.eq_ignore_ascii_case("ping")
+        || trimmed.eq_ignore_ascii_case("pong")
+        || trimmed
             .as_bytes()
             .windows(4)
             .any(|window| window.eq_ignore_ascii_case(b"ping"))
-        && (trimmed.contains('^') || trimmed.contains('+'))
+    {
+        return false;
+    }
+
+    let upper = trimmed.to_ascii_uppercase();
+    trimmed.starts_with('^')
+        || trimmed.starts_with('+')
+        || upper.starts_with("RING")
+        || upper.starts_with("NO CARRIER")
+        || upper.starts_with("NO ANSWER")
+        || upper.starts_with("BUSY")
 }
 
 #[tokio::main]
@@ -40,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.logging.enabled,
         &config.logging.level,
     );
+    notify::init(&config.notification_config.log_file);
 
     // 打印配置信息
     print_config_summary(&config);
@@ -55,22 +74,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auto_flight_mode.monitor_loop().await;
     }
 
-    // 心跳任务
+    // 心跳任务：发送标准空指令 AT，而不是 "ping"。
+    // 模组会把 ping 当作未知命令，回 ERROR 或者完全不回，残留响应会污染下一条命令。
     let c_heartbeat = at_client.clone();
     tokio::spawn(async move {
         let mut heartbeat_timer = interval(Duration::from_secs(30));
+        let mut failures = 0u32;
         loop {
             heartbeat_timer.tick().await;
-            let mut conn = c_heartbeat.conn.lock().await;
-            if !conn.is_connected() {
+            if c_heartbeat.probe().await {
+                failures = 0;
                 continue;
             }
 
-            match conn.send(b"ping\r\n").await {
-                Ok(_) => {}
-                Err(err) => {
-                    crate::log_error!("[AT] 心跳探测失败: {}", err);
-                }
+            failures += 1;
+            if failures >= 3 {
+                crate::log_warn!("[AT] 连续 {} 次心跳失败，标记连接断开并等待重连", failures);
+                c_heartbeat.conn.lock().await.disconnect();
+                failures = 0;
             }
         }
     });
@@ -108,6 +129,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 for line in text.lines() {
                                     if is_urc_line(line) {
                                         crate::log_debug!("[URC DETECTED] <== {:?}", line);
+                                        if let Some((kind, message)) = crate::notify::describe_urc(line) {
+                                            crate::notify::event(kind, &message);
+                                        }
                                         let _ = c_monitor.urc_tx.send(line.to_string());
                                     }
                                 }
@@ -174,6 +198,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         crate::log_info!("认证模式: 未启用 (允许无密钥访问)");
     }
     crate::log_info!("--------------------------------------");
+
+    // 网络变化监控（制式 / 频段 / 载波聚合 / 服务小区）
+    if config.netmon.enabled {
+        netmon::monitor_loop(at_client.clone(), config.netmon.interval).await;
+    }
 
     // 启动WebSocket服务器
     crate::log_info!("WebSocket 服务器运行中...");
@@ -306,6 +335,13 @@ fn print_config_summary(config: &Config) {
             config.auto_airplane.action_time.to_string()
         }
     );
+
+    crate::log_info!("\n网络变化监控:");
+    crate::log_info!(
+        "  启用: {}",
+        if config.netmon.enabled { "是" } else { "否" }
+    );
+    crate::log_info!("  轮询间隔: {} 秒", config.netmon.interval);
 
     crate::log_info!("{}", "=".repeat(60));
 }

@@ -27,6 +27,10 @@ config at-webserver 'config'
 	option notify_memory_full '1'
 	option notify_signal '1'
 	
+	# 网络变化监控（5G/4G、频段、载波聚合、服务小区变化写入通知日志）
+	option netmon_enabled '1'
+	option netmon_interval '30'
+
 	option schedule_auto_airplane_enable '0'        # 启用定时飞行模式
 	option schedule_airplane_time '8:00'     # 飞行模式重启时间
 

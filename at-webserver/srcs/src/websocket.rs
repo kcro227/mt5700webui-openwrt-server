@@ -78,13 +78,26 @@ pub async fn handle_connection(
                 }
             }
             msg = ws_rx.next() => {
-                if let Some(Ok(Message::Text(cmd))) = msg {
-                    let res = match client.send_command(cmd).await {
-                        Ok(r) => json!({ "success": true, "data": r, "error": null }),
-                        Err(e) => json!({ "success": false, "data": null, "error": e.to_string() }),
-                    };
-                    let _ = ws_tx.send(Message::Text(serde_json::to_string(&res).unwrap())).await;
-                } else { break; }
+                match msg {
+                    Some(Ok(Message::Text(cmd))) => {
+                        // 客户端心跳（AtService.startHeartbeat 每 20 秒发送 "ping"）。
+                        // 绝不能把 ping 转发给模组：模组对它回 ERROR 或干脆不回，
+                        // 都会产生一条“迟到”的响应；前端按 FIFO 把响应配给正在等待的
+                        // 命令，于是 AT+CMGF? / AT^IMSSWITCH? 会被误判为失败，
+                        // 短信页就提示“短信功能未开启或不可用”。
+                        if cmd.trim().eq_ignore_ascii_case("ping") {
+                            let _ = ws_tx.send(Message::Text("pong".to_string())).await;
+                        } else {
+                            let res = match client.send_command(cmd).await {
+                                Ok(r) => json!({ "success": true, "data": r, "error": null }),
+                                Err(e) => json!({ "success": false, "data": null, "error": e.to_string() }),
+                            };
+                            let _ = ws_tx.send(Message::Text(serde_json::to_string(&res).unwrap())).await;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    _ => {}
+                }
             }
         }
     }

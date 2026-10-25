@@ -62,7 +62,7 @@ impl AutoAirPlaneMode {
         tokio::spawn(async move {
             crate::log_info!(
                 "[{}] 自动重启飞行模式开始...",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+                Utc::now().with_timezone(&Shanghai).format("%Y-%m-%d %H:%M:%S")
             );
 
             // 关闭飞行模式 (CFUN=0 开启飞行模式)
@@ -82,7 +82,7 @@ impl AutoAirPlaneMode {
 
             crate::log_info!(
                 "[{}] 自动重启飞行模式完成",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+                Utc::now().with_timezone(&Shanghai).format("%Y-%m-%d %H:%M:%S")
             );
         });
     }

@@ -35,6 +35,10 @@ pub const DEFAULT_CONFIG_JSON: &str = r#"{
         "ENABLED": false,
         "ACTION_TIME": "8:00"
     },
+    "NETMON_CONFIG": {
+        "ENABLED": true,
+        "INTERVAL": 30
+    },
     "LOG_CONFIG": {
         "ENABLED": true,
         "LEVEL": "INFO"
@@ -53,6 +57,8 @@ pub struct Config {
     pub notification_config: NotificationConfig,
     #[serde(rename = "SCHEDULE_AIRPLANE_CONFIG")]
     pub auto_airplane: AutoAirPlane,
+    #[serde(rename = "NETMON_CONFIG")]
+    pub netmon: NetMonConfig,
     #[serde(rename = "LOG_CONFIG")]
     pub logging: LoggingConfig,
 }
@@ -139,6 +145,15 @@ pub struct AutoAirPlane {
     pub action_time: String,
 }
 
+/// 网络变化监控：轮询服务小区信息，制式/频段/载波/小区变化时写入通知日志。
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NetMonConfig {
+    #[serde(rename = "ENABLED")]
+    pub enabled: bool,
+    #[serde(rename = "INTERVAL")]
+    pub interval: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoggingConfig {
     #[serde(rename = "ENABLED")]
@@ -187,6 +202,8 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
         "notify_signal",
         "schedule_auto_airplane_enable",
         "schedule_airplane_time",
+        "netmon_enabled",
+        "netmon_interval",
         "log_enabled",
         "log_level",
     ];
@@ -354,6 +371,18 @@ pub fn load_config_from_uci() -> Result<Config, Box<dyn Error>> {
         config.auto_airplane.enabled = enabled;
         config.auto_airplane.action_time = action_time;
     }
+
+    if let Some(enabled) = uci_data.get("netmon_enabled") {
+        config.netmon.enabled = enabled == "1";
+    }
+    if let Some(interval) = uci_data.get("netmon_interval") {
+        config.netmon.interval = interval.parse().unwrap_or(30).clamp(10, 3600);
+    }
+    crate::log_info!(
+        "配置加载: 网络变化监控 = {} (间隔 {} 秒)",
+        if config.netmon.enabled { "启用" } else { "禁用" },
+        config.netmon.interval
+    );
 
     if let Some(enabled) = uci_data.get("log_enabled") {
         config.logging.enabled = enabled == "1";

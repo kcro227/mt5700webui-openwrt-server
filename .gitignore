@@ -1,0 +1,3 @@
+at-webserver/srcs/target/
+*.ipk
+*.log

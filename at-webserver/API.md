@@ -159,3 +159,64 @@ async function getWebSocketInfo() {
 2. 如果不需要外网访问，请在配置中禁用 `allow_wan`
 3. 定期检查服务日志，监控异常访问
 
+## WebSocket 协议
+
+连接地址：`ws://<host>:<port>`（端口即 UCI 的 `websocket_port`，默认 8765）。
+若配置了 `websocket_auth_key`，连接后需先发送：
+
+```json
+{"auth_key": "你的密钥"}
+```
+
+服务端返回 `{"success":true,"message":"认证成功"}` 后才可发送 AT 命令。
+
+### 心跳
+
+客户端每 20 秒发送纯文本 `ping`，服务端直接回纯文本 `pong`（不会把 ping 转发给模组）。
+请勿在等待 AT 响应时发送其它自定义文本，否则会被当成 AT 命令。
+
+### AT 命令
+
+发送纯文本 AT 命令（无需 `\r`，服务端会补 `\r\n`）：
+
+```
+AT+CMGF?
+```
+
+响应：
+
+```json
+{"success": true, "data": "+CMGF: 0\r\nOK", "error": null}
+```
+
+失败时：`{"success": false, "data": null, "error": "ERROR"}`。
+
+### URC 主动上报
+
+模组主动上报（`+CMTI`、`^...` 等）会以如下格式推送给所有已连接客户端：
+
+```json
+{"type": "raw_data", "data": "+CMTI: \"SM\",3"}
+```
+
+### 网络变化日志
+
+服务端按 `netmon_interval`（默认 30 秒）轮询 `AT^MONSC` 与 `AT^HFREQINFO?`，
+制式（5G NR / 4G LTE）、频段（n78 / B3）、载波聚合数量、服务小区（PCI）发生变化时，
+写入 `log_file`（LuCI「通知日志」页面可直接查看），格式：
+
+```
+[2026-10-24 22:40:25] [网络] 制式 5G NR → 4G LTE；频段 n78 → B3；当前: 4G LTE 频段 B3 1CC PCI 120 RSRP -95dBm SINR 8dB
+```
+
+信号强度（RSRP/RSRQ/SINR）的小幅波动不会触发日志。
+
+### 通知日志
+
+服务端会把以下事件写入 `log_file`（LuCI「通知日志」页面可筛选查看）：
+
+- 网络变化：制式 / 频段 / 载波聚合 / 服务小区（PCI）
+- 短信：`+CMTI`、`+CMT`、`+CDS`
+- 来电：`+CLIP`、`NO CARRIER`、`BUSY`、`NO ANSWER`
+
+同时每次采样会把当前网络写入 `/tmp/at-netmon.json`，供 LuCI 配置页显示。

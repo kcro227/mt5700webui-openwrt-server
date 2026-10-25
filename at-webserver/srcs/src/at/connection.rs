@@ -63,6 +63,8 @@ pub trait ATConnection: Send {
     async fn send(&mut self, data: &[u8]) -> Result<usize, Box<dyn Error + Send + Sync>>;
     async fn receive(&mut self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>>;
     fn is_connected(&self) -> bool;
+    /// 标记连接已断开，下一次心跳/重连逻辑会重新建立连接。
+    fn disconnect(&mut self);
 }
 
 // ========== 串口连接实现 ==========
@@ -131,6 +133,10 @@ impl ATConnection for SerialATConn {
 
     fn is_connected(&self) -> bool {
         self.stream.is_some()
+    }
+
+    fn disconnect(&mut self) {
+        self.stream = None;
     }
 }
 
@@ -204,6 +210,10 @@ impl ATConnection for NetworkATConn {
     fn is_connected(&self) -> bool {
         self.stream.is_some()
     }
+
+    fn disconnect(&mut self) {
+        self.stream = None;
+    }
 }
 
 // ========== TomModem 外部命令实现 ==========
@@ -270,5 +280,9 @@ impl ATConnection for TomModemATConn {
 
     fn is_connected(&self) -> bool {
         self.is_connected
+    }
+
+    fn disconnect(&mut self) {
+        self.is_connected = false;
     }
 }

@@ -34,12 +34,14 @@ return view.extend({
 	load: function () {
 		return Promise.all([
 			uci.load('at-webserver'),
-			getServiceStatus()
+			getServiceStatus(),
+			fs.read('/tmp/at-netmon.json').catch(function () { return null; })
 		]);
 	},
 
 	render: function (data) {
 		var isRunning = data[1];
+		var netState = data[2];
 		var m, s, o;
 
 		m = new form.Map('at-webserver', _('AT WebServer'),
@@ -57,6 +59,19 @@ return view.extend({
 				'<span style="color:red">● ' + _('已停止') + '</span>';
 		};
 		o.rawhtml = true;
+
+		// 当前网络（由 atserver 的网络变化监控写入 /tmp/at-netmon.json）
+		o = s.option(form.DummyValue, '_netstate', _('当前网络'));
+		o.rawhtml = true;
+		o.cfgvalue = function () {
+			try {
+				var st = JSON.parse(netState || '{}');
+				if (st.desc)
+					return '<span style="color:#0099CC">' + st.desc + '</span>' +
+						(st.time ? ' <small style="color:#888">(' + st.time + ')</small>' : '');
+			} catch (e) { }
+			return '<span style="color:#888">' + _('暂无数据（服务未运行或网络监控未启用）') + '</span>';
+		};
 
 		// 启用开关
 		o = s.option(form.Flag, 'enabled', _('启用服务'),
@@ -291,6 +306,24 @@ return view.extend({
 			_('网络信号强度变化或制式切换时发送通知'));
 		o.rmempty = false;
 		o.default = '1';
+
+		// 网络变化监控（写入通知日志）
+		o = s.option(form.DummyValue, '_netmon_title', _('网络变化监控'));
+		o.rawhtml = true;
+		o.cfgvalue = function () {
+			return '<h3>' + _('记录 5G/4G 制式、频段、载波聚合和服务小区变化') + '</h3>';
+		};
+
+		o = s.option(form.Flag, 'netmon_enabled', _('启用网络变化监控'),
+			_('定期检查网络状态，制式、频段、载波聚合或服务小区发生变化时写入通知日志'));
+		o.rmempty = false;
+		o.default = '1';
+
+		o = s.option(form.Value, 'netmon_interval', _('轮询间隔（秒）'),
+			_('检查网络状态的时间间隔，建议 30 秒'));
+		o.datatype = 'range(10,3600)';
+		o.default = '30';
+		o.depends('netmon_enabled', '1');
 
 		// 定时锁频配置标题 - 暂时隐藏
 		o = s.option(form.DummyValue, '_schedule_title', _('定时锁频设置'));

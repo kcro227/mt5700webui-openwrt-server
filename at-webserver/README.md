@@ -141,3 +141,62 @@ RSRQ: -10 dB
 SINR: 20 dB
 ```
 
+## 📶 网络变化日志
+
+服务端内置网络监控（Rust 实现，无需额外脚本）：
+
+- 轮询 `AT^MONSC` 获取制式、小区、PCI、RSRP/RSRQ/SINR
+- 轮询 `AT^HFREQINFO?` 获取频段（n78/B3…）、ARFCN、带宽与载波数量
+- 制式切换（5G↔4G↔3G）、频段切换、载波聚合数量变化、服务小区（PCI）变化时写入通知日志
+- 信号强度正常波动不会刷日志
+
+UCI 配置：
+
+```bash
+uci set at-webserver.config.netmon_enabled='1'    # 启用
+uci set at-webserver.config.netmon_interval='30'  # 轮询间隔（10-3600 秒）
+uci set at-webserver.config.log_file='/var/log/at-notifications.log'
+uci commit at-webserver
+```
+
+日志同时写入 syslog（`logread | grep atserver`）和 `log_file`，
+LuCI 的「服务 → AT WebServer → 日志」页面可直接查看。文件超过 1MB 会自动轮转为 `.1`。
+
+## 🔌 WebSocket 心跳约定
+
+前端每 20 秒发送 `ping`，服务端必须回 `pong`，且 **不能** 把 `ping` 转发给模组。
+此前服务端把 `ping` 当 AT 命令发给模组，模组回 `ERROR`/不响应产生的迟到响应会被前端
+按 FIFO 分配给正在等待的 `AT+CMGF?`、`AT^IMSSWITCH?`，于是短信页误报
+“短信功能未开启或不可用”。现已改为直接回 `pong`。
+
+## 🛠 编译
+
+在 OpenWrt 源码树中：
+
+```bash
+make package/mt5700-webui/at-webserver/compile V=s
+make package/mt5700-webui/luci-app-at-webserver/compile V=s
+```
+
+仅调试 Rust 逻辑（主机上，可跑单元测试）：
+
+```bash
+cd at-webserver/srcs && cargo test && cargo build
+```
+
+## 🔔 短信 / 来电日志
+
+服务端从 URC 中识别并写入通知日志：
+
+| URC | 日志内容 |
+| --- | --- |
+| `+CMTI: "SM",3` | `收到新短信（存储 SM，索引 3）` |
+| `+CMT:` / `+CDS:` | `收到新短信` |
+| `+CLIP: "138...",129` | `来电：138...` |
+| `NO CARRIER` / `BUSY` / `NO ANSWER` | `通话结束` |
+
+这些记录与网络变化共用 `log_file`，LuCI 日志页支持按「网络/短信/来电」筛选、
+自动刷新（10 秒）并按类型着色，也可以手动「立即刷新」或「清空日志」。
+
+配置页顶部还会显示当前网络（制式/频段/载波/PCI/RSRP/SINR），数据来自
+`/tmp/at-netmon.json`（由网络监控每次采样时更新）。
